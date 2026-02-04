@@ -2,22 +2,29 @@
 #include <stdio.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
-typedef struct {
+typedef union {
 	struct { float x, y; };
 	struct { float u, v; };
 	float arr[2];
 } Vec2;
-typedef struct {
+typedef union {
 	struct { float x, y, z, w; };
 	struct { float r, g, b, a; };
 	float arr[4];
 } Vec4;
 
-static const Vec2 paper_topleft = { .x = 432, .y = 507 };
-static const Vec2 paper_topright = { .x = 642, .y = 500 };
-static const Vec2 paper_bottomleft = { .x = 410, .y = 563 };
-static const Vec2 paper_bottomright = { .x = 673, .y = 547 };
+static const Vec2 paper_topleft = { .x = 826, .y = 972 };
+static const Vec2 paper_topright = { .x = 1231, .y = 958 };
+static const Vec2 paper_bottomleft = { .x = 788, .y = 1072 };
+static const Vec2 paper_bottomright = { .x = 1287, .y = 1043 };
+
+// static const Vec2 paper_topleft = { .x = 0, .y = 0 };
+// static const Vec2 paper_topright = { .x = 2560, .y = 0 };
+// static const Vec2 paper_bottomleft = { .x = 0, .y = 1440 };
+// static const Vec2 paper_bottomright = { .x = 2560, .y = 1440 };
 
 float lerp_float(float a, float b, float t) {
 	return a * (1 - t) + b * t;
@@ -41,10 +48,15 @@ Vec4 lerp_vec4(Vec4 a, Vec4 b, float t) {
 	return v;
 }
 
-Vec2 perspect_uv_pixel(float u, float v) {
+Vec2 perspect_uv_pixel(float u, float v, int width, int height) {
 	const Vec2 r0 = lerp_vec2(paper_topleft, paper_topright, u);
 	const Vec2 r1 = lerp_vec2(paper_bottomleft, paper_bottomright, u);
-	return lerp_vec2(r0, r1, v);
+    const Vec2 raw = lerp_vec2(r0, r1, v);
+    const Vec2 clamped = (Vec2){
+        .x = fmax(0, fmin(width-1, raw.x)),
+        .y = fmax(0, fmin(height-1, raw.y)),
+    };
+	return clamped;
 }
 
 Vec4 get_pixel(unsigned char *framebuffer, unsigned int x, unsigned int y, int width) {
@@ -83,17 +95,20 @@ Vec4 sample_bilinear(unsigned char *framebuffer, float x, float y, int width) {
 unsigned char *perspect_image(unsigned char *pixels, int width, int height) {
 	unsigned char *framebuffer = (unsigned char *)calloc(4 * width * height, sizeof(unsigned char)); // 4 channels
 	
+    unsigned int counter = 0;
 	for (unsigned int y = 0; y < height; y++) {
 		for (unsigned int x = 0; x < width; x++) {
 			const float u = (float)x / (width - 1);
 			const float v = (float)y / (height - 1);
 			
-			const Vec2 mapped = perspect_uv_pixel(u, v);
-			const Vec4 sample = sample_bilinear(framebuffer, mapped.u, mapped.v, width);
+			const Vec2 mapped = perspect_uv_pixel(u, v, width, height);
+			const Vec4 sample = sample_bilinear(pixels, mapped.x, mapped.y, width);
 			framebuffer[4 * (y * width + x)] = (unsigned char)sample.r;
 			framebuffer[4 * (y * width + x) + 1] = (unsigned char)sample.g;
 			framebuffer[4 * (y * width + x) + 2] = (unsigned char)sample.b;
 			framebuffer[4 * (y * width + x) + 3] = (unsigned char)sample.a;
+
+            counter++;
 		}
 	}
 
@@ -101,16 +116,23 @@ unsigned char *perspect_image(unsigned char *pixels, int width, int height) {
 }
 
 int main(void) {
-	const char *filepath = "../tests/wideuse.jpg";
+	const char *input_path = "../tests/wideuse.jpg";
+	const char *output_path = "../tests/testout.png";
 	
 	int width, height, channels;
-	unsigned char *framebuffer = stbi_load(filepath, &width, &height, &channels, 4); // force RGBA
+	unsigned char *framebuffer = stbi_load(input_path, &width, &height, &channels, 4); // force RGBA
 	if (framebuffer == 0) {
-		fprintf(stderr, "Could not open image: %s\n%s\n", filepath, stbi_failure_reason());
+		fprintf(stderr, "Could not open image: %s\n%s\n", input_path, stbi_failure_reason());
 		exit(1);
 	}
+
+    printf("Width: %d\nHeight: %d\n", width, height);
 	
-	perspect_image(framebuffer, width, height);
+	unsigned char *perspected = perspect_image(framebuffer, width, height);
+    if (!stbi_write_png(output_path, width, height, 4, perspected, width * 4)) {
+        printf("Could not write image: %s\n%s\n", output_path, stbi_failure_reason());
+        exit(1);
+    }
 
 	stbi_image_free(framebuffer);
 	
