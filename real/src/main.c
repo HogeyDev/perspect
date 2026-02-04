@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #define STB_IMAGE_IMPLEMENTATION
@@ -92,27 +93,37 @@ Vec4 sample_bilinear(unsigned char *framebuffer, float x, float y, int width) {
 	return lerp_vec4(r0, r1, dy);
 }
 
-unsigned char *perspect_image(unsigned char *pixels, int width, int height) {
-	unsigned char *framebuffer = (unsigned char *)calloc(4 * width * height, sizeof(unsigned char)); // 4 channels
+unsigned char *perspect_image(unsigned char *pixels, int width, int height, int start_line, int num_lines) {
+	unsigned char *framebuffer = (unsigned char *)calloc(4 * width * num_lines, sizeof(unsigned char)); // 4 channels
 	
     unsigned int counter = 0;
-	for (unsigned int y = 0; y < height; y++) {
+	for (unsigned int dy = 0; dy < num_lines; dy++) {
 		for (unsigned int x = 0; x < width; x++) {
+            const int y = start_line + dy;
 			const float u = (float)x / (width - 1);
 			const float v = (float)y / (height - 1);
 			
 			const Vec2 mapped = perspect_uv_pixel(u, v, width, height);
 			const Vec4 sample = sample_bilinear(pixels, mapped.x, mapped.y, width);
-			framebuffer[4 * (y * width + x)] = (unsigned char)sample.r;
-			framebuffer[4 * (y * width + x) + 1] = (unsigned char)sample.g;
-			framebuffer[4 * (y * width + x) + 2] = (unsigned char)sample.b;
-			framebuffer[4 * (y * width + x) + 3] = (unsigned char)sample.a;
+			framebuffer[4 * (dy * width + x)] = (unsigned char)sample.r;
+			framebuffer[4 * (dy * width + x) + 1] = (unsigned char)sample.g;
+			framebuffer[4 * (dy * width + x) + 2] = (unsigned char)sample.b;
+			framebuffer[4 * (dy * width + x) + 3] = (unsigned char)sample.a;
 
             counter++;
 		}
 	}
+    printf("%d\n", height);
 
 	return framebuffer;
+}
+
+unsigned char *thread_divider(unsigned char *pixels, int width, int height, unsigned int num_threads) {
+    unsigned char *part = perspect_image(pixels, width, height, 0, height / 4);
+    unsigned char *full = (unsigned char *)calloc(4 * width * height, sizeof(unsigned char));
+    memcpy(full, part, width * height * sizeof(unsigned char));
+
+    return full;
 }
 
 int main(void) {
@@ -126,9 +137,7 @@ int main(void) {
 		exit(1);
 	}
 
-    printf("Width: %d\nHeight: %d\n", width, height);
-	
-	unsigned char *perspected = perspect_image(framebuffer, width, height);
+	unsigned char *perspected = thread_divider(framebuffer, width, height, 1);
     if (!stbi_write_png(output_path, width, height, 4, perspected, width * 4)) {
         printf("Could not write image: %s\n%s\n", output_path, stbi_failure_reason());
         exit(1);
